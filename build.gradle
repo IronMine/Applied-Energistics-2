@@ -38,7 +38,7 @@ sourceSets {
 
 configurations {
     shaded {
-        transitive = false
+        transitive = transitive_value
     }
     buildtoolsImplementation.extendsFrom(compileClasspath)
     // Dependencies only used for the guide export, but not shipped
@@ -94,18 +94,18 @@ dependencies {
     shaded "com.google.flatbuffers:flatbuffers-java:${flatbuffers_version}"
 
     implementation(project(':libs:markdown')) {
-        transitive = false
+        transitive = transitive_value
     }
     // Do not inherit any transitive dependencies here since we rely on those dependencies being
     // present in Minecrafts own dependencies already.
     implementation("io.methvin:directory-watcher:${directory_watcher_version}") {
-        transitive = false
+        transitive = transitive_value
     }
     implementation("org.yaml:snakeyaml:${snakeyaml_version}") {
-        transitive = false
+        transitive = transitive_value
     }
     implementation("com.google.flatbuffers:flatbuffers-java:${flatbuffers_version}") {
-        transitive = false
+        transitive = transitive_value
     }
     // Used for the guide export
     guideExportOnly("org.bytedeco:ffmpeg-platform:${ffmpeg_version}")
@@ -119,11 +119,11 @@ dependencies {
     if (project.runtime_itemlist_mod == "emi") {
         runtimeOnly "dev.emi:emi-neoforge:${emi_version}"
 
-        compileOnly "me.shedaniel:RoughlyEnoughItems-neoforge:${project.rei_version}"
+        compileOnly rei_prefix + project.rei_version
     } else if (project.runtime_itemlist_mod == "rei") {
-        implementation "me.shedaniel:RoughlyEnoughItems-neoforge:${project.rei_version}"
+        implementation rei_prefix + project.rei_version
     } else {
-        compileOnly "me.shedaniel:RoughlyEnoughItems-neoforge:${project.rei_version}"
+        compileOnly rei_prefix + project.rei_version
     }
 
     compileOnly "mcp.mobius.waila:wthit-api:neo-${project.wthit_version}"
@@ -132,9 +132,9 @@ dependencies {
     }
 
     if (project.runtime_tooltip_mod == "jade") {
-        implementation("curse.maven:jade-324717:${project.jade_file_id}")
+        implementation(jade_prefix + project.jade_file_id)
     } else {
-        compileOnly("curse.maven:jade-324717:${project.jade_file_id}")
+        compileOnly(jade_prefix + project.jade_file_id)
     }
 
     def topDependency = "curse.maven:the-one-probe-245211:4159743"
@@ -147,9 +147,9 @@ dependencies {
     // unit test dependencies
     testImplementation(platform("org.junit:junit-bom:${project.junit_version}"))
     testRuntimeOnly(project(":libs:junit"))
-    testImplementation("org.junit.jupiter:junit-jupiter-api")
-    testImplementation("org.junit.jupiter:junit-jupiter-params")
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
+    testImplementation("${junit_jupiter}api")
+    testImplementation("${junit_jupiter}params")
+    testRuntimeOnly("${junit_jupiter}engine")
     testImplementation("org.junit.platform:junit-platform-launcher")
     testImplementation("org.assertj:assertj-core:3.19.0")
     testImplementation("com.google.guava:guava-testlib:21.0")
@@ -199,7 +199,7 @@ if (ext.tag) {
         throw new GradleException("Invalid semver: $version")
     }
 } else {
-    version = version_major + "." + version_minor + "." + version_patch
+    version = [version_major,version_minor,version_patch].join(".")
 
     def pr = System.getenv('PR_NUMBER') ?: ""
     if (pr) {
@@ -247,21 +247,13 @@ test {
             var runArgs = runs.getByName("client").realiseJvmArguments()
             for (var i = 0; i < runArgs.size(); i++) {
                 var arg = runArgs.get(i);
-                if (arg.startsWith("-DlegacyClassPath.file=")) {
-                    runArgs.set(i, "-DlegacyClassPath.file=${project.rootDir.absolutePath}/build/test_classpath.txt")
+                if (arg.startsWith(legacy_class_path)) {
+                    runArgs.set(i, "${legacy_class_path + project.rootDir.absolutePath}/build/test_classpath.txt")
                 } else if ((arg == "-p" || arg == "--module-path") && i + 1 < runArgs.size()) {
                     runArgs.set(i + 1, test.classpath
                             .filter {
-                                it.name.contains("bootstraplauncher")
-                                        || it.name.contains("securejarhandler")
-                                        || it.name.contains("asm")
-                                        || it.name.contains("JarJarFileSystems")
-                                        || it.name.startsWith("mockito")
-                                        || it.name.startsWith("junit-jupiter")
-                                        || it.name.startsWith("junit-platform")
-                                        || it.name.startsWith("opentest4j")
-                                        || it.name.startsWith("assertj-")
-                                        || it.name.startsWith("guava-testlib-")
+                                ["bootstraplauncher","securejarhandler","asm","JarJarFileSystems"].contains(it.name) ||
+                                        ["mockito","junit-jupiter","junit-platform","opentest4j","assertj-","guava-testlib-"].any(x -> it.name.startsWith(x))
                             }
                             .join(File.pathSeparator))
                 }
@@ -542,19 +534,19 @@ spotless {
 // Crowdin
 task uploadToCrowdin(type: JavaExec) {
     classpath = sourceSets.buildtools.runtimeClasspath
-    mainClass = 'Crowdin'
+    mainClass = crowdin
     args 'upload_source'
     workingDir "."
 }
 task uploadTranslations(type: JavaExec) {
     classpath = sourceSets.buildtools.runtimeClasspath
-    mainClass = 'Crowdin'
+    mainClass = crowdin
     args 'upload_translations'
     workingDir "."
 }
 task downloadFromCrowdin(type: JavaExec) {
     classpath = sourceSets.buildtools.runtimeClasspath
-    mainClass = 'Crowdin'
+    mainClass = crowdin
     args 'update_translations'
     workingDir "."
 }
@@ -578,22 +570,21 @@ check.dependsOn tasks.register('validateResources', JavaExec) {
  */
 tasks.register('downloadFlatbufferCompiler', Download) {
     var os = System.getProperty("os.name").toLowerCase(Locale.ROOT)
-    var arch = System.getProperty("os.arch")
-    if (os.startsWith("windows")) {
-        src "https://github.com/google/flatbuffers/releases/download/v${flatbuffers_version}/Windows.flatc.binary.zip"
-    } else if (os.startsWith("mac")) {
-        if (arch == "aarch64") {
-            src "https://github.com/google/flatbuffers/releases/download/v${flatbuffers_version}/Mac.flatc.binary.zip"
-        } else if (arch == "amd64") {
-            src "https://github.com/google/flatbuffers/releases/download/v${flatbuffers_version}/MacIntel.flatc.binary.zip"
-        } else {
+    var flatbuffers_os
+    if (os.startsWith(windows_os)) {
+        flatbuffers_os = windows_os_name
+    } else if (os.startsWith(mac_os)) {
+        var arch = System.getProperty("os.arch")
+        if (![mac_arch,mac_intel_arch].contains(arch))
             throw new GradleException("Unknown Mac architecture: $arch")
-        }
-    } else if (os.startsWith("linux")) {
-        src "https://github.com/google/flatbuffers/releases/download/v${flatbuffers_version}/Linux.flatc.binary.clang++-12.zip"
+        flatbuffers_os = arch == mac_arch ? mac_arch_name : mac_intel_arch_name
+    } else if (os.startsWith(linux_os)) {
+        flatbuffers_os = linux_os_name
     } else {
         throw new GradleException("Unknown OS: $os")
     }
+    src "${flatbuffers_url + flatbuffers_version}/${flatbuffers_os}.flatc.binary${os.startsWith(linux_os) ? ".clang++-12" :""}.zip"
+
     onlyIfModified true
     dest "${project.buildDir}/flatc.zip"
 }
